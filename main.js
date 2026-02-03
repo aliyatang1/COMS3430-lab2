@@ -58,7 +58,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const ADSR = { attack: 0.01, decay: 0.08, sustain: 0.7, release: 0.12 };
 
     function perVoicePeak(count) {
-        return 1 / Math.max(1, count); // simple equal-energy scaling
+        return 1 / Math.max(1, count); 
     }
 
     function rescaleActiveVoices() {
@@ -86,7 +86,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         const now = audioCtx.currentTime;
         
         const newCount = Object.keys(activeOscillators).length + 1;
-        // Calculate per-voice peak based on new count 
+        // Calculate per voice peak based on new count 
         const peak = perVoicePeak(newCount);
 
         gainNode.gain.setValueAtTime(0.0001, now);
@@ -102,6 +102,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
         activeOscillators[key] = { osc, gainNode };
         rescaleActiveVoices();
+        updateKeyVisuals();
     }
 
     function stopNote(key) {
@@ -119,9 +120,15 @@ document.addEventListener("DOMContentLoaded", function(event) {
         // Stop and cleanup after the release finishes
         osc.stop(now + ADSR.release);
         
-        // Remove from active list immediately so keys can be re-pressed
+        // Remove from active list immediately so keys can be repressed
         delete activeOscillators[key];
         rescaleActiveVoices(); 
+        const el = document.querySelector(`.key[data-key="${key}"]`);
+        if (el) {
+            el.classList.remove('active');
+            el.style.removeProperty('--key-color');
+        }
+        updateKeyVisuals();
     }
     const keyOrder = [
       '90','83','88','68','67','86','71','66','72','78','74','77',
@@ -162,11 +169,8 @@ document.addEventListener("DOMContentLoaded", function(event) {
             k.className = 'key';
             k.dataset.key = code;
             k.textContent = noteNameMap[code] || String.fromCharCode(code);
-            
-            // ATTACH TO DOM
             keyboardEl.appendChild(k);
 
-            // ADD INTERACTIVITY
             k.addEventListener('mousedown', () => {
                 if (audioCtx.state === 'suspended') audioCtx.resume();
                 playNote(code);
@@ -211,4 +215,28 @@ document.addEventListener("DOMContentLoaded", function(event) {
             setKeyActive(key, false); 
         }
     }
+    function randomBrightColor() {
+        const hue = Math.floor(Math.random() * 360);
+        return `hsl(${hue}, 80%, 65%)`;
+    }
+    function updateKeyVisuals() {
+        const keys = Object.keys(activeOscillators);
+        const multi = keys.length >= 2;
+
+        keys.forEach(code => {
+            const el = document.querySelector(`.key[data-key="${code}"]`);
+            if (!el) return;
+
+            el.classList.add('active');
+
+            if (multi) {
+            // random color per key
+            el.style.setProperty('--key-color', randomBrightColor());
+            } else {
+            // single key -> default color
+            el.style.removeProperty('--key-color');
+            }
+        });
+    }
+
 });
