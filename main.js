@@ -201,11 +201,11 @@ document.addEventListener("DOMContentLoaded", function(event) {
     function keyDown(event) {
         if (event.repeat) return; // prevents retrigger while holding
 
-        const key = (event.which || event.keyCode).toString(); // ✅ not event.detail
+        const key = (event.which || event.keyCode).toString(); 
         if (keyboardFrequencyMap[key] && !activeOscillators[key]) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             playNote(key);
-            setKeyActive(key, true); // ✅ light it up
+            setKeyActive(key, true); 
         }
     }
 
