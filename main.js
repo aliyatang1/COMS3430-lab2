@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const globalGain = audioCtx.createGain();
     globalGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    globalGain.connect(audioCtx.destination);
+    globalGain.connect(audioCtx.destination);   
 
     const keyboardFrequencyMap = {
         '90': 261.625565300598634,  //Z - C
@@ -55,79 +55,72 @@ document.addEventListener("DOMContentLoaded", function(event) {
     // Build visual keyboard (show note names in correct musical order)
     const keyboardEl = document.getElementById('keyboard');
     // ...existing code...
-        // ADSR + polyphony helpers
-        const ADSR = { attack: 0.01, decay: 0.08, sustain: 0.7, release: 0.12 };
+    // ADSR + polyphony helpers
+    const ADSR = { attack: 0.01, decay: 0.08, sustain: 0.7, release: 0.12 };
 
-        function perVoicePeak(count) {
-            return 1 / Math.max(1, count); // simple equal-energy scaling
-        }
+    function perVoicePeak(count) {
+        return 1 / Math.max(1, count); // simple equal-energy scaling
+    }
 
-        function rescaleActiveVoices() {
-            const keys = Object.keys(activeOscillators);
-            const peak = perVoicePeak(keys.length);
-            const now = audioCtx.currentTime;
-            keys.forEach(k => {
-                const g = activeOscillators[k].gainNode.gain;
-                g.cancelScheduledValues(now);
-                // move smoothly to new sustain level to avoid clicks
-                g.setValueAtTime(g.value, now);
-                g.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + 0.02);
-            });
-        }
-
-        function playNote(key) {
-            if (activeOscillators[key]) return;
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-
-            // use UI waveform
-            osc.type = (waveformSelect && waveformSelect.value) ? waveformSelect.value : 'sine';
-            osc.frequency.setValueAtTime(keyboardFrequencyMap[key], audioCtx.currentTime);
-
-            const now = audioCtx.currentTime;
-            // compute peak for new voice (including it)
-            const newCount = Object.keys(activeOscillators).length + 1;
-            const peak = perVoicePeak(newCount);
-
-            // ADSR: tiny start, ramp to peak, then decay to sustain*peak
-            gainNode.gain.setValueAtTime(0.0001, now);
-            gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + ADSR.attack);
-            gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
-
-            osc.connect(gainNode);
-            gainNode.connect(globalGain);
-
-            osc.start(now);
-            activeOscillators[key] = { osc, gainNode };
-
-            // rescale existing voices so total stays bounded
-            rescaleActiveVoices();
-        }
-
-        function stopNote(key) {
-            const entry = activeOscillators[key];
-            if (!entry) return;
-            const now = audioCtx.currentTime;
-            // smooth release to avoid click
-            const g = entry.gainNode.gain;
+    function rescaleActiveVoices() {
+        const keys = Object.keys(activeOscillators);
+        const peak = perVoicePeak(keys.length);
+        const now = audioCtx.currentTime;
+        keys.forEach(k => {
+            const g = activeOscillators[k].gainNode.gain;
             g.cancelScheduledValues(now);
+            // move smoothly to new sustain level to avoid clicks
             g.setValueAtTime(g.value, now);
-            // use setTargetAtTime for natural release curve
-            g.setTargetAtTime(0.0001, now, ADSR.release / 4);
-            // stop oscillator after release completes
-            const stopTime = now + ADSR.release + 0.05;
-            try { entry.osc.stop(stopTime); } catch (e) {}
-            // cleanup and delete after stop completes
-            const cleanupDelay = (ADSR.release + 0.1) * 1000;
-            setTimeout(() => {
-                try { entry.osc.disconnect(); } catch(e){}
-                try { entry.gainNode.disconnect(); } catch(e){}
-                delete activeOscillators[key];
-            }, cleanupDelay);
-            // rescale remaining voices down/up smoothly
-            setTimeout(rescaleActiveVoices, 20);
-        }
-    // ...existing code...    // explicit order: C, C#, D, D#, E, F, F#, G, G#, A, A#, B, then next octave C..B
+            g.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + 0.02);
+        });
+    }
+
+    function playNote(key) {
+        if (activeOscillators[key]) return;
+        
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain(); 
+
+        const waveform = (waveformSelect && waveformSelect.value) ? waveformSelect.value : 'sine';
+        osc.type = waveform;
+        osc.frequency.setValueAtTime(keyboardFrequencyMap[key], audioCtx.currentTime);
+
+        const now = audioCtx.currentTime;
+        
+        const newCount = Object.keys(activeOscillators).length + 1;
+        const peak = perVoicePeak(newCount);
+
+        gainNode.gain.setValueAtTime(0.0001, now);
+        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + ADSR.attack);
+        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
+
+        // osc.connect(gainNode);
+        // gainNode.connect(globalGain); 
+        (osc.connect(gainNode)).connect(globalGain);
+
+        osc.start(now);
+        activeOscillators[key] = { osc, gainNode };
+        rescaleActiveVoices();
+    }
+
+    function stopNote(key) {
+        const entry = activeOscillators[key];
+        if (!entry) return;
+
+        const { osc, gainNode } = entry;
+        const now = audioCtx.currentTime;
+
+        // Trigger Release phase
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + ADSR.release);
+
+        // Stop and cleanup after the release finishes
+        osc.stop(now + ADSR.release);
+        
+        // Remove from active list immediately so keys can be re-pressed
+        delete activeOscillators[key];
+    }
     const keyOrder = [
       '90','83','88','68','67','86','71','66','72','78','74','77',
       '81','50','87','51','69','82','53','84','54','89','55','85'
@@ -214,17 +207,8 @@ document.addEventListener("DOMContentLoaded", function(event) {
     function keyUp(event) {
         const key = (event.detail || event.which).toString();
         if (keyboardFrequencyMap[key] && activeOscillators[key]) {
-            activeOscillators[key].stop();
-            delete activeOscillators[key];
+            stopNote(key);
         }
     }
 
-    function playNote(key) {
-        const osc = audioCtx.createOscillator();
-        osc.frequency.setValueAtTime(keyboardFrequencyMap[key], audioCtx.currentTime);
-        osc.type = 'sine';
-        osc.connect(audioCtx.destination);
-        osc.start();
-        activeOscillators[key] = osc;
-    }
 });
