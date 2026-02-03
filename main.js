@@ -68,7 +68,6 @@ document.addEventListener("DOMContentLoaded", function(event) {
         keys.forEach(k => {
             const g = activeOscillators[k].gainNode.gain;
             g.cancelScheduledValues(now);
-            // move smoothly to new sustain level to avoid clicks
             g.setValueAtTime(g.value, now);
             g.exponentialRampToValueAtTime(Math.max(0.01, peak * ADSR.sustain), now + 0.02);
         });
@@ -185,30 +184,31 @@ document.addEventListener("DOMContentLoaded", function(event) {
             });
         });
     }
+    function setKeyActive(code, isActive) {
+        const el = document.querySelector(`.key[data-key="${code}"]`);
+        if (!el) return;
+        el.classList.toggle('active', isActive);
+    }
+    // use simple key handlers and oscillator storage as requested
+    window.addEventListener('keydown', keyDown, false);
+    window.addEventListener('keyup', keyUp, false);
 
-    // 1. Updated Listeners
-    window.addEventListener("keydown", (e) => {
-        if (e.repeat) return;
+    function keyDown(event) {
+        if (event.repeat) return; // prevents retrigger while holding
 
-        // Use e.code to get the physical key string (e.g., "KeyZ")
-        const code = e.code; 
-
-        if (keyboardFrequencyMap[code] && !activeOscillators[code]) {
+        const key = (event.which || event.keyCode).toString(); 
+        if (keyboardFrequencyMap[key] && !activeOscillators[key]) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            playNote(code);
-            
-            // Find the visual element using the same code
-            const el = document.querySelector(`.key[data-key="${code}"]`);
-            if (el) el.classList.add("active");
+            playNote(key);
+            setKeyActive(key, true); 
         }
-    });
+    }
 
-    window.addEventListener("keyup", (e) => {
-        const code = e.code;
-        if (activeOscillators[code]) {
-            stopNote(code);
-            const el = document.querySelector(`.key[data-key="${code}"]`);
-            if (el) el.classList.remove("active");
+    function keyUp(event) {
+        const key = (event.which || event.keyCode).toString();
+        if (activeOscillators[key]) {
+            stopNote(key);
+            setKeyActive(key, false); 
         }
-    });
+    }
 });
