@@ -54,7 +54,6 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
     // Build visual keyboard (show note names in correct musical order)
     const keyboardEl = document.getElementById('keyboard');
-    // ...existing code...
     // ADSR + polyphony helpers
     const ADSR = { attack: 0.01, decay: 0.08, sustain: 0.7, release: 0.12 };
 
@@ -71,7 +70,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
             g.cancelScheduledValues(now);
             // move smoothly to new sustain level to avoid clicks
             g.setValueAtTime(g.value, now);
-            g.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + 0.02);
+            g.exponentialRampToValueAtTime(Math.max(0.01, peak * ADSR.sustain), now + 0.02);
         });
     }
 
@@ -88,17 +87,20 @@ document.addEventListener("DOMContentLoaded", function(event) {
         const now = audioCtx.currentTime;
         
         const newCount = Object.keys(activeOscillators).length + 1;
+        // Calculate per-voice peak based on new count 
         const peak = perVoicePeak(newCount);
 
         gainNode.gain.setValueAtTime(0.0001, now);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + ADSR.attack);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
 
-        // osc.connect(gainNode);
-        // gainNode.connect(globalGain); 
         (osc.connect(gainNode)).connect(globalGain);
-
         osc.start(now);
+        osc.onended = () => {
+            try { osc.disconnect(); } catch {}
+            try { gainNode.disconnect(); } catch {}
+        };
+
         activeOscillators[key] = { osc, gainNode };
         rescaleActiveVoices();
     }
@@ -120,6 +122,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         
         // Remove from active list immediately so keys can be re-pressed
         delete activeOscillators[key];
+        rescaleActiveVoices(); 
     }
     const keyOrder = [
       '90','83','88','68','67','86','71','66','72','78','74','77',
@@ -153,62 +156,59 @@ document.addEventListener("DOMContentLoaded", function(event) {
         '85': 'B'    // U
     };
 
+    // Create visual keyboard
     if (keyboardEl) {
         keyOrder.forEach(code => {
             const k = document.createElement('div');
             k.className = 'key';
             k.dataset.key = code;
-            k.textContent = noteNameMap[code] || String.fromCharCode(code); // show note name
+            k.textContent = noteNameMap[code] || String.fromCharCode(code);
+            
+            // ATTACH TO DOM
             keyboardEl.appendChild(k);
 
-            // mouse/touch handlers (resume audioCtx before playing; log for debug)
-            k.addEventListener('mousedown', (ev) => {
-                ev.preventDefault();
+            // ADD INTERACTIVITY
+            k.addEventListener('mousedown', () => {
                 if (audioCtx.state === 'suspended') audioCtx.resume();
                 playNote(code);
-                console.log('playNote -> activeOscillators:', Object.keys(activeOscillators));
                 k.classList.add('active');
             });
-            k.addEventListener('mouseup', (ev) => {
-                ev.preventDefault();
+            k.addEventListener('mouseup', () => {
                 stopNote(code);
-                console.log('stopNote -> activeOscillators:', Object.keys(activeOscillators));
                 k.classList.remove('active');
             });
-            // keep mouseleave/touch handlers but also resume on touchstart
-            k.addEventListener('mouseleave', () => { if (k.classList.contains('active')) { stopNote(code); k.classList.remove('active'); }});
-            k.addEventListener('touchstart', (ev) => {
-                ev.preventDefault();
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                playNote(code);
-                console.log('playNote (touch) -> activeOscillators:', Object.keys(activeOscillators));
-                k.classList.add('active');
-            }, {passive:false});
-            k.addEventListener('touchend', (ev) => {
-                ev.preventDefault();
-                stopNote(code);
-                console.log('stopNote (touch) -> activeOscillators:', Object.keys(activeOscillators));
-                k.classList.remove('active');
-            }, {passive:false});
+            k.addEventListener('mouseleave', () => {
+                if (activeOscillators[code]) {
+                    stopNote(code);
+                    k.classList.remove('active');
+                }
+            });
         });
     }
 
-    // use simple key handlers and oscillator storage as requested
-    window.addEventListener('keydown', keyDown, false);
-    window.addEventListener('keyup', keyUp, false);
+    // 1. Updated Listeners
+    window.addEventListener("keydown", (e) => {
+        if (e.repeat) return;
 
-    function keyDown(event) {
-        const key = (event.detail || event.which).toString();
-        if (keyboardFrequencyMap[key] && !activeOscillators[key]) {
-            playNote(key);
+        // Use e.code to get the physical key string (e.g., "KeyZ")
+        const code = e.code; 
+
+        if (keyboardFrequencyMap[code] && !activeOscillators[code]) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            playNote(code);
+            
+            // Find the visual element using the same code
+            const el = document.querySelector(`.key[data-key="${code}"]`);
+            if (el) el.classList.add("active");
         }
-    }
+    });
 
-    function keyUp(event) {
-        const key = (event.detail || event.which).toString();
-        if (keyboardFrequencyMap[key] && activeOscillators[key]) {
-            stopNote(key);
+    window.addEventListener("keyup", (e) => {
+        const code = e.code;
+        if (activeOscillators[code]) {
+            stopNote(code);
+            const el = document.querySelector(`.key[data-key="${code}"]`);
+            if (el) el.classList.remove("active");
         }
-    }
-
+    });
 });
