@@ -69,7 +69,6 @@ document.addEventListener("DOMContentLoaded", function(event) {
         keys.forEach(k => {
             const g = activeOscillators[k].gainNode.gain;
             g.cancelScheduledValues(now);
-            // move smoothly to new sustain level to avoid clicks
             g.setValueAtTime(g.value, now);
             g.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + 0.02);
         });
@@ -94,8 +93,6 @@ document.addEventListener("DOMContentLoaded", function(event) {
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + ADSR.attack);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
 
-        // osc.connect(gainNode);
-        // gainNode.connect(globalGain); 
         (osc.connect(gainNode)).connect(globalGain);
 
         osc.start(now);
@@ -192,23 +189,31 @@ document.addEventListener("DOMContentLoaded", function(event) {
             }, {passive:false});
         });
     }
-
+    function setKeyActive(code, isActive) {
+        const el = document.querySelector(`.key[data-key="${code}"]`);
+        if (!el) return;
+        el.classList.toggle('active', isActive);
+    }
     // use simple key handlers and oscillator storage as requested
     window.addEventListener('keydown', keyDown, false);
     window.addEventListener('keyup', keyUp, false);
 
     function keyDown(event) {
-        const key = (event.detail || event.which).toString();
+        if (event.repeat) return; // prevents retrigger while holding
+
+        const key = (event.which || event.keyCode).toString(); // ✅ not event.detail
         if (keyboardFrequencyMap[key] && !activeOscillators[key]) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
             playNote(key);
+            setKeyActive(key, true); // ✅ light it up
         }
     }
 
     function keyUp(event) {
-        const key = (event.detail || event.which).toString();
-        if (keyboardFrequencyMap[key] && activeOscillators[key]) {
+        const key = (event.which || event.keyCode).toString();
+        if (activeOscillators[key]) {
             stopNote(key);
+            setKeyActive(key, false); 
         }
     }
-
 });
