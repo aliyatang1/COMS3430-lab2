@@ -4,6 +4,22 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const globalGain = audioCtx.createGain();
     globalGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
     globalGain.connect(audioCtx.destination);   
+    // // // Uncomment to double check no amplitude > 1 / waveform visualizer
+    // var globalAnalyser;
+    // // // Uncomment to double check no amplitude > 1
+    // globalAnalyser = audioCtx.createAnalyser();
+    // globalGain.disconnect();
+    // globalGain.connect(globalAnalyser);
+    // globalAnalyser.connect(audioCtx.destination);
+    // amplitudeLogger();
+
+    // // // Uncomment to show waveform visualizer
+    // globalGain.disconnect();
+    // globalAnalyser = audioCtx.createAnalyser();
+    // globalGain.connect(globalAnalyser);
+    // globalAnalyser.connect(audioCtx.destination);
+    // draw();
+
 
     const keyboardFrequencyMap = {
         '90': 261.625565300598634,  //Z - C
@@ -118,7 +134,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, now + ADSR.release);
 
         // Stop and cleanup after the release finishes
-        osc.stop(now + ADSR.release);
+        osc.stop(now + 5*ADSR.release);
         
         // Remove from active list immediately so keys can be repressed
         delete activeOscillators[key];
@@ -238,5 +254,66 @@ document.addEventListener("DOMContentLoaded", function(event) {
             }
         });
     }
+
+    // // Uncomment to double check no amplitude > 1
+    // var maxAlltime = 0
+    // function amplitudeLogger() {
+    //     globalAnalyser.fftSize = 2048;
+    //     var bufferLength = globalAnalyser.frequencyBinCount;
+    //     var dataArray = new Uint8Array(bufferLength);
+    //     globalAnalyser.getByteTimeDomainData(dataArray);
+
+    //     //values range 0-255, over the range -1,1, so we find the max value from a frame, and then scale
+    //     var maxValue = (dataArray.reduce((max, curr) => (curr > max ? curr : max)) - 128) / 127.0;
+    //     console.log(maxValue);
+    //     if (maxValue > maxAlltime){
+    //         maxAlltime = maxValue;
+    //     }
+    //     console.log("Max amplitude so far: " + maxAlltime);
+    //     if (maxAlltime > 1.0) {
+    //         console.warn("WARNING: Clipping detected! Amplitude " + maxAlltime + " exceeds 1.0");
+    //     }
+    //     requestAnimationFrame(amplitudeLogger);
+    // }
+
+    // // Uncomment to show waveform visualizer
+    // function draw() {
+    //     globalAnalyser.fftSize = 2048;
+    //     var bufferLength = globalAnalyser.frequencyBinCount;
+    //     var dataArray = new Uint8Array(bufferLength);
+    //     globalAnalyser.getByteTimeDomainData(dataArray);
+
+    //     var canvas = document.querySelector("#globalVisualizer");
+    //     var canvasCtx = canvas.getContext("2d");
+
+    //     requestAnimationFrame(draw);
+
+    //     globalAnalyser.getByteTimeDomainData(dataArray);
+
+    //     canvasCtx.fillStyle = "white";
+    //     canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    //     canvasCtx.lineWidth = 2;
+    //     canvasCtx.strokeStyle = "rgb(0, 0, 0)";
+
+    //     canvasCtx.beginPath();
+
+    //     var sliceWidth = canvas.width * 1.0 / bufferLength;
+    //     var x = 0;
+
+    //     for (var i = 0; i < bufferLength; i++) {
+    //         var v = dataArray[i] / 128.0;
+    //         var y = v * canvas.height / 2;
+    //         if (i === 0) {
+    //             canvasCtx.moveTo(x, y);
+    //         } else {
+    //             canvasCtx.lineTo(x, y);
+    //         }
+    //         x += sliceWidth;
+    //     }
+
+    //     canvasCtx.lineTo(canvas.width, canvas.height / 2);
+    //     canvasCtx.stroke();
+    // }
 
 });
