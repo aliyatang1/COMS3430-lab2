@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const globalGain = audioCtx.createGain();
     globalGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
-    globalGain.connect(audioCtx.destination);   
+    globalGain.connect(audioCtx.destination);
     // // // Uncomment to double check no amplitude > 1 / waveform visualizer
     // var globalAnalyser;
     // // // Uncomment to double check no amplitude > 1
@@ -19,6 +19,16 @@ document.addEventListener("DOMContentLoaded", function(event) {
     // globalGain.connect(globalAnalyser);
     // globalAnalyser.connect(audioCtx.destination);
     // draw();
+
+    // Synthesis mode settings
+    var synthesisMode = 'additive'; // 'additive', 'am', 'fm'
+    var antiClipping = false;
+
+    // AM/FM synthesis constants
+    var AM_MODULATOR_FREQ = 10; // Hz
+    var FM_MODULATOR_FREQ = 5; // Hz
+    var FM_MODULATION_INDEX = 50; // controls depth of frequency modulation
+
 
 
     const keyboardFrequencyMap = {
@@ -59,6 +69,21 @@ document.addEventListener("DOMContentLoaded", function(event) {
     // settings UI
     const volumeSlider = document.getElementById('volume');
     const waveformSelect = document.getElementById('waveform');
+    const synthesisSelect = document.getElementById('synthesis');
+    const antiClippingCheckbox = document.getElementById('anti-clipping');
+
+    if (synthesisSelect) {
+        synthesisSelect.addEventListener('change', (e) => {
+            synthesisMode = e.target.value;
+        });
+    }
+
+    if (antiClippingCheckbox) {
+        antiClippingCheckbox.addEventListener('change', (e) => {
+            antiClipping = e.target.checked;
+        });
+    }
+
     if (volumeSlider) {
         volumeSlider.addEventListener('input', (e) => {
             const v = parseFloat(e.target.value);
@@ -91,41 +116,108 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
     function playNote(key) {
         if (activeOscillators[key]) return;
-        
-        const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain(); 
-
-        const waveform = (waveformSelect && waveformSelect.value) ? waveformSelect.value : 'sine';
-        osc.type = waveform;
-        osc.frequency.setValueAtTime(keyboardFrequencyMap[key], audioCtx.currentTime);
 
         const now = audioCtx.currentTime;
-        
+        const noteFreq = keyboardFrequencyMap[key];
         const newCount = Object.keys(activeOscillators).length + 1;
-        // Calculate per voice peak based on new count 
         const peak = perVoicePeak(newCount);
 
+        let oscillators = [];
+        let gainNode = audioCtx.createGain();
+
+        if (synthesisMode === 'additive') {
+            // ADDITIVE SYNTHESIS: 5 oscillators at harmonics
+            for (let harmonic = 1; harmonic <= 5; harmonic++) {
+                const osc = audioCtx.createOscillator();
+                osc.type = 'sine';
+
+                // Add slight detuning to upper harmonics for richness
+                const detuneAmount = harmonic > 1 ? (Math.random() - 0.5) * 15 : 0;
+                osc.frequency.setValueAtTime(noteFreq * harmonic + detuneAmount, now);
+
+                // Each harmonic gets scaled by 1/harmonic for natural decay
+                const harmonyGain = audioCtx.createGain();
+                harmonyGain.gain.setValueAtTime(0.7 / harmonic, now);
+                osc.connect(harmonyGain);
+                harmonyGain.connect(gainNode);
+
+                oscillators.push(osc);
+            }
+        } else if (synthesisMode === 'am') {
+            // AMPLITUDE MODULATION SYNTHESIS
+            const carrier = audioCtx.createOscillator();
+            carrier.type = 'sine';
+            carrier.frequency.setValueAtTime(noteFreq, now);
+
+            const modulator = audioCtx.createOscillator();
+            modulator.frequency.setValueAtTime(AM_MODULATOR_FREQ, now);
+
+            const depth = audioCtx.createGain();
+            depth.gain.setValueAtTime(0.5, now);
+            const depthOffset = audioCtx.createGain();
+            depthOffset.gain.setValueAtTime(0.5, now);
+
+            // Modulate the amplitude via gainNode
+            modulator.connect(depth);
+            depth.connect(gainNode.gain);
+            depthOffset.connect(gainNode.gain);
+
+            carrier.connect(gainNode);
+            oscillators.push(carrier, modulator);
+        } else if (synthesisMode === 'fm') {
+            // FREQUENCY MODULATION SYNTHESIS
+            const carrier = audioCtx.createOscillator();
+            carrier.type = 'sine';
+            carrier.frequency.setValueAtTime(noteFreq, now);
+
+            const modulator = audioCtx.createOscillator();
+            modulator.frequency.setValueAtTime(FM_MODULATOR_FREQ, now);
+
+            const modulationIndex = audioCtx.createGain();
+            modulationIndex.gain.setValueAtTime(FM_MODULATION_INDEX, now);
+
+            // Modulate the carrier frequency
+            modulator.connect(modulationIndex);
+            modulationIndex.connect(carrier.frequency);
+
+            carrier.connect(gainNode);
+            oscillators.push(carrier, modulator);
+        }
+
+        // Apply envelope
+        const calcPeak = antiClipping ? peak * 0.5 : peak; // reduce if anti-clipping enabled
         gainNode.gain.setValueAtTime(0.0001, now);
-        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + ADSR.attack);
-        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
+        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak), now + ADSR.attack);
+        gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
 
-        (osc.connect(gainNode)).connect(globalGain);
-        osc.start(now);
-        osc.onended = () => {
-            try { osc.disconnect(); } catch {}
-            try { gainNode.disconnect(); } catch {}
-        };
+        gainNode.connect(globalGain);
 
-        activeOscillators[key] = { osc, gainNode };
+        // Start all oscillators
+        oscillators.forEach(osc => osc.start(now));
+
+        activeOscillators[key] = { oscillators, gainNode };
         rescaleActiveVoices();
         updateKeyVisuals();
+
+        // Cleanup handler
+        const allOscillators = oscillators;
+        const gn = gainNode;
+        Promise.resolve().then(() => {
+            const osc = allOscillators[0];
+            if (osc) {
+                osc.onended = () => {
+                    try { allOscillators.forEach(o => o.disconnect()); } catch {}
+                    try { gn.disconnect(); } catch {}
+                };
+            }
+        });
     }
 
     function stopNote(key) {
         const entry = activeOscillators[key];
         if (!entry) return;
 
-        const { osc, gainNode } = entry;
+        const { oscillators, gainNode } = entry;
         const now = audioCtx.currentTime;
 
         // Trigger Release phase
@@ -134,11 +226,11 @@ document.addEventListener("DOMContentLoaded", function(event) {
         gainNode.gain.exponentialRampToValueAtTime(0.0001, now + ADSR.release);
 
         // Stop and cleanup after the release finishes
-        osc.stop(now + 5*ADSR.release);
-        
+        oscillators.forEach(osc => osc.stop(now + 5 * ADSR.release));
+
         // Remove from active list immediately so keys can be repressed
         delete activeOscillators[key];
-        rescaleActiveVoices(); 
+        rescaleActiveVoices();
         const el = document.querySelector(`.key[data-key="${key}"]`);
         if (el) {
             el.classList.remove('active');
