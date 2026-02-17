@@ -129,7 +129,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
             // ADDITIVE SYNTHESIS: 5 oscillators at harmonics
             for (let harmonic = 1; harmonic <= 5; harmonic++) {
                 const osc = audioCtx.createOscillator();
-                osc.type = 'sine';
+                osc.type = waveformSelect?.value || 'sine';
 
                 // Add slight detuning to upper harmonics for richness
                 const detuneAmount = harmonic > 1 ? (Math.random() - 0.5) * 15 : 0;
@@ -146,7 +146,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         } else if (synthesisMode === 'am') {
             // AMPLITUDE MODULATION SYNTHESIS
             const carrier = audioCtx.createOscillator();
-            carrier.type = 'sine';
+            carrier.type = waveformSelect?.value || 'sine';
             carrier.frequency.setValueAtTime(noteFreq, now);
 
             const modulator = audioCtx.createOscillator();
@@ -167,7 +167,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         } else if (synthesisMode === 'fm') {
             // FREQUENCY MODULATION SYNTHESIS
             const carrier = audioCtx.createOscillator();
-            carrier.type = 'sine';
+            carrier.type = waveformSelect?.value || 'sine';
             carrier.frequency.setValueAtTime(noteFreq, now);
 
             const modulator = audioCtx.createOscillator();
@@ -185,7 +185,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
         }
 
         // Apply envelope
-        const calcPeak = antiClipping ? peak * 0.5 : peak; // reduce if anti-clipping enabled
+        const calcPeak = antiClipping ? peak * 0.5 : peak; 
         gainNode.gain.setValueAtTime(0.0001, now);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak), now + ADSR.attack);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
