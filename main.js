@@ -24,10 +24,15 @@ document.addEventListener("DOMContentLoaded", function(event) {
     var synthesisMode = 'additive'; // 'additive', 'am', 'fm'
     var antiClipping = false;
 
-    // AM/FM synthesis constants
+    // User-controllable synthesis parameters
     var AM_MODULATOR_FREQ = 10; // Hz
     var FM_MODULATOR_FREQ = 5; // Hz
     var FM_MODULATION_INDEX = 50; // controls depth of frequency modulation
+    var NUM_HARMONICS = 5; // for additive synthesis
+    var ADDITIVE_MIX = 1.0; // amplitude scaling for additive (0-1)
+    var LFO_ENABLED = true; // enable global LFO modulation
+    var LFO_SPEED = 0.8; // Hz - speed of LFO
+    var LFO_DEPTH = 0.3; // how much the LFO affects parameters (0-1)
 
 
 
@@ -71,6 +76,13 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const waveformSelect = document.getElementById('waveform');
     const synthesisSelect = document.getElementById('synthesis');
     const antiClippingCheckbox = document.getElementById('anti-clipping');
+    const amModFreqSlider = document.getElementById('am-mod-freq');
+    const fmModFreqSlider = document.getElementById('fm-mod-freq');
+    const fmModIndexSlider = document.getElementById('fm-mod-index');
+    const numHarmonicsSlider = document.getElementById('num-harmonics');
+    const lfoEnabledCheckbox = document.getElementById('lfo-enabled');
+    const lfoSpeedSlider = document.getElementById('lfo-speed');
+    const lfoDepthSlider = document.getElementById('lfo-depth');
 
     if (synthesisSelect) {
         synthesisSelect.addEventListener('change', (e) => {
@@ -81,6 +93,54 @@ document.addEventListener("DOMContentLoaded", function(event) {
     if (antiClippingCheckbox) {
         antiClippingCheckbox.addEventListener('change', (e) => {
             antiClipping = e.target.checked;
+        });
+    }
+
+    if (amModFreqSlider) {
+        amModFreqSlider.addEventListener('input', (e) => {
+            AM_MODULATOR_FREQ = parseFloat(e.target.value);
+            document.getElementById('am-freq-display').textContent = e.target.value;
+        });
+    }
+
+    if (fmModFreqSlider) {
+        fmModFreqSlider.addEventListener('input', (e) => {
+            FM_MODULATOR_FREQ = parseFloat(e.target.value);
+            document.getElementById('fm-freq-display').textContent = e.target.value;
+        });
+    }
+
+    if (fmModIndexSlider) {
+        fmModIndexSlider.addEventListener('input', (e) => {
+            FM_MODULATION_INDEX = parseFloat(e.target.value);
+            document.getElementById('fm-index-display').textContent = e.target.value;
+        });
+    }
+
+    if (numHarmonicsSlider) {
+        numHarmonicsSlider.addEventListener('input', (e) => {
+            NUM_HARMONICS = parseInt(e.target.value);
+            document.getElementById('harm-display').textContent = e.target.value;
+        });
+    }
+
+    if (lfoEnabledCheckbox) {
+        lfoEnabledCheckbox.addEventListener('change', (e) => {
+            LFO_ENABLED = e.target.checked;
+        });
+    }
+
+    if (lfoSpeedSlider) {
+        lfoSpeedSlider.addEventListener('input', (e) => {
+            LFO_SPEED = parseFloat(e.target.value);
+            document.getElementById('lfo-speed-display').textContent = e.target.value;
+        });
+    }
+
+    if (lfoDepthSlider) {
+        lfoDepthSlider.addEventListener('input', (e) => {
+            LFO_DEPTH = parseFloat(e.target.value);
+            document.getElementById('lfo-depth-display').textContent = e.target.value;
         });
     }
 
@@ -126,8 +186,9 @@ document.addEventListener("DOMContentLoaded", function(event) {
         let gainNode = audioCtx.createGain();
 
         if (synthesisMode === 'additive') {
-            // ADDITIVE SYNTHESIS: 5 oscillators at harmonics
-            for (let harmonic = 1; harmonic <= 5; harmonic++) {
+            // ADDITIVE SYNTHESIS: multiple harmonics (configurable count)
+            const harmonicGains = []; // store for LFO modulation
+            for (let harmonic = 1; harmonic <= NUM_HARMONICS; harmonic++) {
                 const osc = audioCtx.createOscillator();
                 osc.type = waveformSelect?.value || 'sine';
 
@@ -137,11 +198,31 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
                 // Each harmonic gets scaled by 1/harmonic for natural decay
                 const harmonyGain = audioCtx.createGain();
-                harmonyGain.gain.setValueAtTime(0.7 / harmonic, now);
+                const baseAmplitude = (0.7 / harmonic) * ADDITIVE_MIX;
+                harmonyGain.gain.setValueAtTime(baseAmplitude, now);
                 osc.connect(harmonyGain);
                 harmonyGain.connect(gainNode);
 
                 oscillators.push(osc);
+                harmonicGains.push({ gain: harmonyGain, baseAmplitude, harmonic });
+            }
+
+            // Add LFO to modulate harmonic levels
+            if (LFO_ENABLED && harmonicGains.length > 0) {
+                const lfo = audioCtx.createOscillator();
+                lfo.frequency.setValueAtTime(LFO_SPEED, now);
+                const lfoGain = audioCtx.createGain();
+                lfoGain.gain.setValueAtTime(LFO_DEPTH * 0.3, now);
+
+                // Connect LFO to alternate harmonic gains for movement
+                lfo.connect(lfoGain);
+                harmonicGains.forEach((hg, idx) => {
+                    if (idx % 2 === 1) { // modulate odd harmonics
+                        lfoGain.connect(hg.gain.gain);
+                    }
+                });
+
+                oscillators.push(lfo);
             }
         } else if (synthesisMode === 'am') {
             // AMPLITUDE MODULATION SYNTHESIS
@@ -164,6 +245,17 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
             carrier.connect(gainNode);
             oscillators.push(carrier, modulator);
+
+            // Add LFO to modulate the modulation depth
+            if (LFO_ENABLED) {
+                const lfo = audioCtx.createOscillator();
+                lfo.frequency.setValueAtTime(LFO_SPEED, now);
+                const lfoAMDepth = audioCtx.createGain();
+                lfoAMDepth.gain.setValueAtTime(LFO_DEPTH * 0.2, now);
+                lfo.connect(lfoAMDepth);
+                lfoAMDepth.connect(depth.gain);
+                oscillators.push(lfo);
+            }
         } else if (synthesisMode === 'fm') {
             // FREQUENCY MODULATION SYNTHESIS
             const carrier = audioCtx.createOscillator();
@@ -182,6 +274,17 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
             carrier.connect(gainNode);
             oscillators.push(carrier, modulator);
+
+            // Add LFO to modulate the modulation index (creates evolving timbre)
+            if (LFO_ENABLED) {
+                const lfo = audioCtx.createOscillator();
+                lfo.frequency.setValueAtTime(LFO_SPEED, now);
+                const lfoFMIndex = audioCtx.createGain();
+                lfoFMIndex.gain.setValueAtTime(LFO_DEPTH * FM_MODULATION_INDEX * 0.5, now);
+                lfo.connect(lfoFMIndex);
+                lfoFMIndex.connect(modulationIndex.gain);
+                oscillators.push(lfo);
+            }
         }
 
         // Apply envelope
