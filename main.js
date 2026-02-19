@@ -4,14 +4,14 @@ document.addEventListener("DOMContentLoaded", function(event) {
     const globalGain = audioCtx.createGain();
     globalGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
     globalGain.connect(audioCtx.destination);
-    // // // Uncomment to double check no amplitude > 1 / waveform visualizer
-    // var globalAnalyser;
-    // // // Uncomment to double check no amplitude > 1
-    // globalAnalyser = audioCtx.createAnalyser();
-    // globalGain.disconnect();
-    // globalGain.connect(globalAnalyser);
-    // globalAnalyser.connect(audioCtx.destination);
-    // amplitudeLogger();
+    // // Uncomment to double check no amplitude > 1 / waveform visualizer
+    var globalAnalyser;
+    // // Uncomment to double check no amplitude > 1
+    globalAnalyser = audioCtx.createAnalyser();
+    globalGain.disconnect();
+    globalGain.connect(globalAnalyser);
+    globalAnalyser.connect(audioCtx.destination);
+    amplitudeLogger();
 
     // // // Uncomment to show waveform visualizer
     // globalGain.disconnect();
@@ -148,9 +148,11 @@ document.addEventListener("DOMContentLoaded", function(event) {
         volumeSlider.addEventListener('input', (e) => {
             const v = parseFloat(e.target.value);
             globalGain.gain.setValueAtTime(v, audioCtx.currentTime);
+            document.getElementById('vol-display').textContent = v.toFixed(2);
         });
         // initialize
         globalGain.gain.setValueAtTime(parseFloat(volumeSlider.value), audioCtx.currentTime);
+        document.getElementById('vol-display').textContent = parseFloat(volumeSlider.value).toFixed(2);
     }
 
     // Build visual keyboard (show note names in correct musical order)
@@ -198,7 +200,10 @@ document.addEventListener("DOMContentLoaded", function(event) {
 
                 // Each harmonic gets scaled by 1/harmonic for natural decay
                 const harmonyGain = audioCtx.createGain();
-                const baseAmplitude = (0.7 / harmonic) * ADDITIVE_MIX;
+                const targetVoicePeak = 0.8; // headroom for LFO / phases
+                const norm = targetVoicePeak / (harmonicSum(NUM_HARMONICS) || 1);
+                const baseAmplitude = (0.7 * norm / harmonic) * ADDITIVE_MIX;
+
                 harmonyGain.gain.setValueAtTime(baseAmplitude, now);
                 osc.connect(harmonyGain);
                 harmonyGain.connect(gainNode);
@@ -211,14 +216,14 @@ document.addEventListener("DOMContentLoaded", function(event) {
             if (LFO_ENABLED && harmonicGains.length > 0) {
                 const lfo = audioCtx.createOscillator();
                 lfo.frequency.setValueAtTime(LFO_SPEED, now);
-                const lfoGain = audioCtx.createGain();
-                lfoGain.gain.setValueAtTime(LFO_DEPTH * 0.3, now);
-
-                // Connect LFO to alternate harmonic gains for movement
-                lfo.connect(lfoGain);
+                
+                // For each odd harmonic, create a separate chain with its own LFO depth control
                 harmonicGains.forEach((hg, idx) => {
                     if (idx % 2 === 1) { // modulate odd harmonics
-                        lfoGain.connect(hg.gain.gain);
+                        const lfoDeptheControl = audioCtx.createGain();
+                        lfoDeptheControl.gain.setValueAtTime(LFO_DEPTH * hg.baseAmplitude * 0.3, now);
+                        lfo.connect(lfoDeptheControl);
+                        lfoDeptheControl.connect(hg.gain);
                     }
                 });
 
@@ -230,30 +235,32 @@ document.addEventListener("DOMContentLoaded", function(event) {
             carrier.type = waveformSelect?.value || 'sine';
             carrier.frequency.setValueAtTime(noteFreq, now);
 
+            const carrierGain = audioCtx.createGain();
+            carrierGain.gain.setValueAtTime(0.7, now);
+
             const modulator = audioCtx.createOscillator();
             modulator.frequency.setValueAtTime(AM_MODULATOR_FREQ, now);
 
-            const depth = audioCtx.createGain();
-            depth.gain.setValueAtTime(0.5, now);
-            const depthOffset = audioCtx.createGain();
-            depthOffset.gain.setValueAtTime(0.5, now);
+            const modDepth = audioCtx.createGain();
+            modDepth.gain.setValueAtTime(0.4, now);  // modulation depth (0-1)
 
-            // Modulate the amplitude via gainNode
-            modulator.connect(depth);
-            depth.connect(gainNode.gain);
-            depthOffset.connect(gainNode.gain);
-
-            carrier.connect(gainNode);
+            // AM: modulator modulates the carrier's amplitude
+            // Formula: output = carrier * (1 + modulator * depth)
+            carrier.connect(carrierGain);
+            modulator.connect(modDepth);
+            modDepth.connect(carrierGain.gain);
+            carrierGain.connect(gainNode);
+            
             oscillators.push(carrier, modulator);
 
             // Add LFO to modulate the modulation depth
             if (LFO_ENABLED) {
                 const lfo = audioCtx.createOscillator();
                 lfo.frequency.setValueAtTime(LFO_SPEED, now);
-                const lfoAMDepth = audioCtx.createGain();
-                lfoAMDepth.gain.setValueAtTime(LFO_DEPTH * 0.2, now);
-                lfo.connect(lfoAMDepth);
-                lfoAMDepth.connect(depth.gain);
+                const lfoModDepth = audioCtx.createGain();
+                lfoModDepth.gain.setValueAtTime(LFO_DEPTH * 0.15, now);
+                lfo.connect(lfoModDepth);
+                lfoModDepth.connect(modDepth.gain);
                 oscillators.push(lfo);
             }
         } else if (synthesisMode === 'fm') {
@@ -265,12 +272,12 @@ document.addEventListener("DOMContentLoaded", function(event) {
             const modulator = audioCtx.createOscillator();
             modulator.frequency.setValueAtTime(FM_MODULATOR_FREQ, now);
 
-            const modulationIndex = audioCtx.createGain();
-            modulationIndex.gain.setValueAtTime(FM_MODULATION_INDEX, now);
+            const modulationGain = audioCtx.createGain();
+            modulationGain.gain.setValueAtTime(FM_MODULATION_INDEX, now);
 
-            // Modulate the carrier frequency
-            modulator.connect(modulationIndex);
-            modulationIndex.connect(carrier.frequency);
+            // FM: modulator's amplitude modulates the carrier's frequency
+            modulator.connect(modulationGain);
+            modulationGain.connect(carrier.frequency);
 
             carrier.connect(gainNode);
             oscillators.push(carrier, modulator);
@@ -279,16 +286,16 @@ document.addEventListener("DOMContentLoaded", function(event) {
             if (LFO_ENABLED) {
                 const lfo = audioCtx.createOscillator();
                 lfo.frequency.setValueAtTime(LFO_SPEED, now);
-                const lfoFMIndex = audioCtx.createGain();
-                lfoFMIndex.gain.setValueAtTime(LFO_DEPTH * FM_MODULATION_INDEX * 0.5, now);
-                lfo.connect(lfoFMIndex);
-                lfoFMIndex.connect(modulationIndex.gain);
+                const lfoModGain = audioCtx.createGain();
+                lfoModGain.gain.setValueAtTime(LFO_DEPTH * FM_MODULATION_INDEX * 0.3, now);
+                lfo.connect(lfoModGain);
+                lfoModGain.connect(modulationGain.gain);
                 oscillators.push(lfo);
             }
         }
 
         // Apply envelope
-        const calcPeak = antiClipping ? peak * 0.5 : peak; 
+        const calcPeak = antiClipping ? peak * 0.35 : peak * 0.6;
         gainNode.gain.setValueAtTime(0.0001, now);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak), now + ADSR.attack);
         gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, calcPeak * ADSR.sustain), now + ADSR.attack + ADSR.decay);
@@ -379,7 +386,14 @@ document.addEventListener("DOMContentLoaded", function(event) {
             const k = document.createElement('div');
             k.className = 'key';
             k.dataset.key = code;
-            k.textContent = noteNameMap[code] || String.fromCharCode(code);
+            const noteName = noteNameMap[code] || String.fromCharCode(code);
+            k.textContent = noteName;
+
+            // Add black class for sharps/flats
+            if (noteName.includes('#')) {
+                k.classList.add('black');
+            }
+
             keyboardEl.appendChild(k);
 
             k.addEventListener('mousedown', () => {
@@ -449,27 +463,33 @@ document.addEventListener("DOMContentLoaded", function(event) {
             }
         });
     }
+    function harmonicSum(n) {
+        let s = 0;
+        for (let i = 1; i <= n; i++) s += 1 / i;
+        return s;
+    }
+
 
     // // Uncomment to double check no amplitude > 1
-    // var maxAlltime = 0
-    // function amplitudeLogger() {
-    //     globalAnalyser.fftSize = 2048;
-    //     var bufferLength = globalAnalyser.frequencyBinCount;
-    //     var dataArray = new Uint8Array(bufferLength);
-    //     globalAnalyser.getByteTimeDomainData(dataArray);
+    var maxAlltime = 0
+    function amplitudeLogger() {
+        globalAnalyser.fftSize = 2048;
+        var bufferLength = globalAnalyser.frequencyBinCount;
+        var dataArray = new Uint8Array(bufferLength);
+        globalAnalyser.getByteTimeDomainData(dataArray);
 
-    //     //values range 0-255, over the range -1,1, so we find the max value from a frame, and then scale
-    //     var maxValue = (dataArray.reduce((max, curr) => (curr > max ? curr : max)) - 128) / 127.0;
-    //     console.log(maxValue);
-    //     if (maxValue > maxAlltime){
-    //         maxAlltime = maxValue;
-    //     }
-    //     console.log("Max amplitude so far: " + maxAlltime);
-    //     if (maxAlltime > 1.0) {
-    //         console.warn("WARNING: Clipping detected! Amplitude " + maxAlltime + " exceeds 1.0");
-    //     }
-    //     requestAnimationFrame(amplitudeLogger);
-    // }
+        //values range 0-255, over the range -1,1, so we find the max value from a frame, and then scale
+        var maxValue = (dataArray.reduce((max, curr) => (curr > max ? curr : max)) - 128) / 127.0;
+        console.log(maxValue);
+        if (maxValue > maxAlltime){
+            maxAlltime = maxValue;
+        }
+        console.log("Max amplitude so far: " + maxAlltime);
+        if (maxAlltime > 1.0) {
+            console.warn("WARNING: Clipping detected! Amplitude " + maxAlltime + " exceeds 1.0");
+        }
+        requestAnimationFrame(amplitudeLogger);
+    }
 
     // // Uncomment to show waveform visualizer
     // function draw() {
